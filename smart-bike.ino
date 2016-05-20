@@ -1,58 +1,32 @@
-// Defined LCD Display
-#include <Adafruit_ssd1306syp.h>
-
-
-#include <Wtv020sd16p.h>
-#include <Servo.h>
+#include <Adafruit_ssd1306syp.h> // OLED
+#include "DHT.h" // temperature
+#include <Servo.h> // Servo
+#include <Wtv020sd16p.h> // Audio
 
 //define OLCD
 #define SDA_PIN A8
 #define SCL_PIN A9
 Adafruit_ssd1306syp display(SDA_PIN, SCL_PIN);
 
-// define Servo motor 
-Servo backGearServo;
+//define temperature
+#define DHTPIN 48     // к какому пину будет подключен вывод Data
+#define DHTTYPE DHT11   // DHT 11 
+DHT dht(DHTPIN, DHTTYPE); //init
 
-// define voice module
-int resetPin = 7;  // The pin number of the reset pin 7.
-int clockPin = 6;  // The pin number of the clock pin 8.
-int dataPin = 5;  // The pin number of the data pin 5.
-int busyPin = 4;  // The pin number of the busy pin 4.
+// Audio
+int resetPin = 7;
+int clockPin = 6;
+int dataPin = 5;
+int busyPin = 4;
 Wtv020sd16p wtv020sd16p(resetPin,clockPin,dataPin,busyPin);
 
+int buttonGearHigh = 26;
+int buttonGearLow = 28;
 
-
-// temperatura
-#include "DHT.h"
-#define DHTPIN 48     // к какому пину будет подключен вывод Data
-
-//выбор используемого датчика
-#define DHTTYPE DHT11   // DHT 11 
-//#define DHTTYPE DHT22   // DHT 22  (AM2302)
-//#define DHTTYPE DHT21   // DHT 21 (AM2301)
-
-//инициализация датчика
-DHT dht(DHTPIN, DHTTYPE);
-
-
-// define Magnit
- int magnitPin = 2;
-// Interapt
-int interrupt = 0;
 volatile int state = 0;
-volatile int statePin = LOW;
-
-// define Giro
-
-// define temp vareble
-long timer = 0;
-int magnitTimeout = 0;
+volatile long prevTime = 0;
+volatile long timer = 0;
 int localState = 0;
-
-// VoiceComment
-long prevTime3 = 0;
-int IsSay = 0;
-
 // Clock 
 bool printHours = false;
 long prevmicros = 0;//переменная для хранения значений таймера
@@ -60,32 +34,40 @@ int sek = 0; //значение секунд
 int minu = 0; //значение минут
 int chas = 0; //значение часов
 boolean counter = false; // счетчик для полусекунд
-boolean noSayHello = true;
 
-// define main vareble
-int currentGear = 1;
+//calc speed
 double oborot = 2.1;
 double KM = 0.00;
-int maxSpeed;
-double distance = 0.00;
+int KMH = 0;
+int magnitTimeout = 0;
 bool stopBike = false;
 
-void magnitBlink()
-{
-  state++;
-}
+double maxSpeed = 0.00;
+double countOborots = 0.00;
+double distance = 0.00;
+
+//Gear control 
+long LastChangeGearTime = 0;
+int currentGear = 3;
+String LastChangedGear = "";
+bool servoAtMiddle = true;
+int servoZero = 124;
+
+// define Servo motor 
+Servo backGearServo;
 
 void setup() {
-  Serial.begin(9600);
-  Serial.println("Start");
-  
+
+  // buttons
+  pinMode(buttonGearHigh, INPUT);
+  digitalWrite(buttonGearHigh, HIGH);
+
+  pinMode(buttonGearLow, INPUT);
+  digitalWrite(buttonGearLow, HIGH);
+
+  // Audio
   dht.begin();
   wtv020sd16p.reset();
-  
-  attachInterrupt(interrupt, magnitBlink, FALLING);
-  
-  // setup Servo motor
-  backGearServo.attach(2);
   
   // OLED 
   display.initialize();
@@ -96,52 +78,78 @@ void setup() {
   display.println("Welcome!");
   display.update();
   
-  if(noSayHello == true)
-    SeyHello();
-    
-  delay(3000);
- 
-  DisplayInfo();
-  
-  // setup Giro
+  // put your setup code here, to run once:
+  attachInterrupt(0, magnitBlink, FALLING);
 
+  digitalWrite(2, HIGH);
+
+  // setup Servo motor
+  backGearServo.attach(3);
+
+  Serial.begin(9600);
+  Serial.println("Start");
+  SetServoToZero();
+  DisplayInfo();
+  // audio ok sound
+  wtv020sd16p.asyncPlayVoice(0);
+  delay(2000);
 }
 
 void loop() {
-  
-  digitalWrite(magnitPin, statePin);
-  // Calc Time and Speed
-  CalcTime();
+  CalcTimeInRoad();
+  TurnBackServo();
 }
-
-void SeyHello()
+void magnitBlink()
 {
-  wtv020sd16p.asyncPlayVoice(0);
-  noSayHello = false;
+  timer = millis();
+  double diff = timer - prevTime;
+  double a = diff / 1000;
+  double ms =  oborot / a;
+  KM = ms * 3.6; 
+  prevTime = timer;
+  countOborots++;
+  state = 1;
 }
 
-void CalcTime() {
-
-  if(!stopBike){
+void readButtons(){
+  if (digitalRead(buttonGearHigh) == HIGH) {
+    Serial.println("buttonGearHigh");
+    setManualGearHigh();
+    delay(50);
+  }
+  if (digitalRead(buttonGearLow) == HIGH) {
+    Serial.println("buttonGearHigh");
+    setManualGearLow();
+    delay(50);
+  }
+}
+void CalcTimeInRoad() {
     if (micros() - prevmicros > 500000)
     { 
       prevmicros = micros();  //принимает значение каждые полсекунды
       counter = !counter;
       if (counter == false)
       { 
-        localState = state;
-    state = 0;
-    
-    sek++;    //переменная секунда + 1
-    
-    CalcSpeed();
-    DisplayInfo();
+        sek++;    //переменная секунда + 1
+        
+        if(state == 0){ // когда за секунду не было прерываний магнитом
+          localState++;
+          if(localState == 3){ // если 3 секунды нет сигнала от магнита
+            KMH = 0;
+            KM = 0;
+            stopBike = true;
+            wtv020sd16p.asyncPlayVoice(10);
+          }
+        }else{
+          localState = 0;
+          stopBike = false;
+        }
+        KMH = ceil(KM);
+        SpeedController(KMH);
+        DisplayInfo();
+        state = 0;
       }
-      else
-      {
-     
-      }
-  
+      
       if (sek > 59) //если переменная секунда больше 59 ...
       {
         sek = 0; //сбрасываем ее на 0
@@ -156,48 +164,110 @@ void CalcTime() {
       {
         chas = 0; //сбрасываем ее на 0
       }
-      //PrintTime();
     }
-  }else if(state > 0){
-  stopBike = false;
-  magnitTimeout = 0;
-  }
-  
-  //if 3 sec we have no signal from magnit
-  if(magnitTimeout == 3){
-    stopBike = true;
-    KM = 0;
-  magnitTimeout++;
-  DisplayInfo();
-  }
+
 }
 
-// Main Logic
-
-void CalcSpeed() {
-  
-  
-  if(localState > 0){
-  double ms =  state * oborot / (magnitTimeout + 1);
-  KM = ms * 3.6; // meter / sec and conver to km/h
-  magnitTimeout = 0;
-  stopBike = false;
-  }else{
-  magnitTimeout++;
-  }
-  
-  // Calc Distance
-  CalcDistance();
-  int KMH = ceil(KM);
-  CalcMaxSpeed(KMH);
-  SpeedController(KMH);
-  VoiceComment(KMH);
+void CalcMaxSpeed(double KMH){
+  if(maxSpeed < KMH)
+    maxSpeed = KMH;
 }
 
 void CalcDistance() {
-  distance += oborot / 1000;
+  distance = countOborots * oborot / 1000;
 }
 
+void SpeedController(int KMH) {
+  if (KMH > 1 && KMH < 5) {
+    if (currentGear != 1)
+      ChangeGear(3);
+  } else if (KMH >= 5 && KMH < 7) {
+    if (currentGear != 2)
+      ChangeGear(3);
+  } else if (KMH >= 7 && KMH < 13) {
+    if (currentGear != 3)
+      ChangeGear(3);
+  } else if (KM >= 13 && KMH < 18) {
+    if (currentGear != 4)
+      ChangeGear(4);
+  } else if (KM >= 18 && KMH < 24) {
+    if (currentGear != 5)
+      ChangeGear(5);
+  }else if (KM >= 24 && KMH < 29) {
+    if (currentGear != 6)
+      ChangeGear(6);
+  }else if (KM > 29) {
+    if (currentGear != 7)
+      ChangeGear(7);
+  }
+ 
+  if(!servoAtMiddle)
+    TurnBackServo();
+
+  CalcMaxSpeed(KMH);
+  CalcDistance();
+}
+
+void ChangeGear(int num) {
+  if(servoAtMiddle){
+    makeStep(num);
+  }
+}
+
+void makeStep(int num) {
+  if (num > currentGear){
+    GearHigh();
+    currentGear++;
+    // Say current gear
+    wtv020sd16p.asyncPlayVoice(currentGear);
+  }else if (num < currentGear){
+    GearLow();
+    currentGear--;
+    // Say current gear
+    wtv020sd16p.asyncPlayVoice(currentGear);
+  }
+}
+
+void GearHigh(){
+    //Serial.println("GearHigh");
+    LastChangeGearTime = millis();
+    backGearServo.write(180);
+    LastChangedGear = "high";
+    servoAtMiddle = false;
+}
+
+void GearLow(){
+    //Serial.println("GearLow");
+    LastChangeGearTime = millis();
+    backGearServo.write(0);
+    LastChangedGear = "low";
+    servoAtMiddle = false;
+}  
+
+void TurnBackServo(){
+  if(!servoAtMiddle){
+    long now = millis();
+    long diff = now - LastChangeGearTime;
+    
+    if(LastChangedGear == "high" && diff >= 500)
+      SetServoToZero();
+    if(LastChangedGear == "low" && diff >= 900)
+      SetServoToZero();  
+  }
+}
+
+void SetServoToZero(){
+    backGearServo.write(servoZero);
+    servoAtMiddle = true;
+}
+
+void setManualGearHigh(){
+  currentGear++;
+}
+
+void setManualGearLow(){
+  currentGear--;
+}
 
 void DisplayInfo() {
   display.clear();
@@ -219,32 +289,14 @@ void PrintGear()
   display_println(currentGear);
 }
 
-void PrintTermo()
-{
-    // температура
-    int h = dht.readHumidity();
-    int t = dht.readTemperature();
-  
-    // проверяем правильные ли данные получили
-    if (isnan(t) || isnan(h)) {
-      Serial.println("Error reading from DHT");
-    } else {
-      display.setCursor(66, 22);
-      display.setTextSize(1);  
-      display_print(t);
-      display_print(" *C ");
-      display_print(h);
-      display_print(" %");
-    }
-}
-
 void PrintSpeed()
 {
   // Display current speed
-  int KMH = ceil(KM);
-  display.setTextSize(5);
-  display.setCursor(0, 22);
-  display_println(KMH);
+  if(KMH < 99){
+    display.setTextSize(5);
+    display.setCursor(0, 22);
+    display_println(KMH);
+  }
 }
 
 void PrintMaxSpeed()
@@ -263,10 +315,30 @@ void PrintDistance()
   display_println(distance);
 }
 
+void PrintTermo()
+{
+    // температура
+    int h = dht.readHumidity();
+    int t = dht.readTemperature();
+  
+    // проверяем правильные ли данные получили
+    if (isnan(t) || isnan(h)) {
+      //Serial.println("Error reading from DHT");
+    } else {
+      display.setCursor(66, 22);
+      display.setTextSize(1);
+      int _t = t - 2;
+      int _h = h - 10;
+      display_print(_t);
+      display_print(" *C ");
+      display_print(_h);
+      display_print(" %");
+    }
+}
+
 void PrintTime(){
-    
+  display.setTextSize(2);
   if(printHours){
-    display.setTextSize(2);
     if (chas>=0 && chas<10) {
       display_print("0");
       display_print(chas);
@@ -302,195 +374,6 @@ void PrintTime(){
   // active Signalization
 }
 
-void SpeedController(int KMH) {
-  if (KMH > 1 && KMH < 5) {
-    if (currentGear != 1){
-      //GearSteps(1);
-    }
-  } else if (KMH >= 5 && KMH < 7) {
-    if (currentGear != 2){
-      //GearSteps(2);
-    }
-  } else if (KMH >= 7 && KMH < 10) {
-    if (currentGear != 3)
-      GearSteps(3);
-  } else if (KM >= 10 && KMH < 15) {
-    if (currentGear != 4)
-      GearSteps(4);
-  } else if (KM >= 15 && KMH < 20) {
-    if (currentGear != 5)
-      GearSteps(5);
-  }else if (KM >= 20 && KMH < 25) {
-    if (currentGear != 6)
-      GearSteps(6);
-  }else if (KM >= 25 && KMH < 30) {
-    if (currentGear != 7)
-      GearSteps(7);
-  }else if (KM > 30) {
-    if (currentGear != 8)
-      GearSteps(8);
-  }
-}
-
-void GearSteps(int num) {
-
-  makeStep(num);
-
-  // TODO: Correction don't work.
-  //if (num == currentGear + 1 || num == currentGear - 1)
-    //makeStep(num);
-  //else
-    //needCorrection(num);
-}
-
-void needCorrection(int num){
-  if (num > currentGear && num != currentGear)
-    int correct = num - 1;
-  else if (num < currentGear && num != currentGear)
-    int correct = num + 1;
-}
-
-void makeStep(int num) {
-  if (num == 1)
-    TurnFirstGear(currentGear);
-  else if (num == 2)
-    TurnSecondGear(currentGear);
-  else if (num == 3)
-    TurnThirdGear(currentGear);
-  else if (num == 4)
-    TurnFourthGear(currentGear);
-  else if (num == 5)
-    TurnFifthGear(currentGear);
-  else if (num == 6)
-    TurnSixthGear(currentGear);
-  else if (num == 7)
-    TurnSeventhGear(currentGear);
-  else if (num == 8)
-    TurnEighthGear(currentGear);
-
-  currentGear = num;
-}
-
-void TurnFirstGear(int currentGear){
-  if (currentGear > 1)
-  {
-    /* code */
-  }else{
-
-  }
-  wtv020sd16p.asyncPlayVoice(1);
-}
-
-void TurnSecondGear(int currentGear){
-  if (currentGear > 2)
-  {
-    /* code */
-  }else{
-
-  }
-  wtv020sd16p.asyncPlayVoice(2);
-}
-
-void TurnThirdGear(int currentGear){
-  if (currentGear > 3)
-  {
-    /* code */
-  }else{
-
-  }
-  wtv020sd16p.asyncPlayVoice(3);
-}
-
-void TurnFourthGear(int currentGear){
-  if (currentGear > 4)
-  {
-    /* code */
-  }else{
-
-  }
-  wtv020sd16p.asyncPlayVoice(4);
-}
-
-void TurnFifthGear(int currentGear){
-  if (currentGear > 5)
-  {
-    /* code */
-  }else{
-
-  }
-  wtv020sd16p.asyncPlayVoice(5);
-}
-
-void TurnSixthGear(int currentGear){
-  if (currentGear > 6)
-  {
-    /* code */
-  }else{
-
-  }
-  wtv020sd16p.asyncPlayVoice(6);
-}
-
-void TurnSeventhGear(int currentGear){
-  if (currentGear > 7)
-  {
-    /* code */
-  }else{
-
-  }
-  wtv020sd16p.asyncPlayVoice(7);
-}
-
-void TurnEighthGear(int currentGear){
-  if (currentGear > 8)
-  {
-    /* code */
-  }else{
-
-  }
-  wtv020sd16p.asyncPlayVoice(8);
-}
-
-void CalcMaxSpeed(int KMH) {
-  if (maxSpeed < KMH) {
-    maxSpeed = KMH;
-  }
-}
-
-void VoiceComment(int KMH){
-  long diff = timer - prevTime3;
-  if(diff > 10000){
-    IsSay = 0;
-  }
-    if(KMH > 17 && KMH < 19 && IsSay == 0){
-      prevTime3 = timer;
-      wtv020sd16p.asyncPlayVoice(10);
-      IsSay = 1;
-    }
-    if(KMH > 20 && KMH < 22 && IsSay == 0){
-      prevTime3 = timer;
-      wtv020sd16p.asyncPlayVoice(12);
-      IsSay = 1;
-    }
-    if(KMH > 31 && KMH < 32 && IsSay == 0){
-      wtv020sd16p.asyncPlayVoice(30);
-      IsSay = 1;
-      prevTime3 = timer;
-    }
-    if(KMH > 41 && KMH < 42){
-      wtv020sd16p.asyncPlayVoice(40);
-      IsSay = 1;
-      prevTime3 = timer;
-    }
-    if(KMH > 50){
-      wtv020sd16p.asyncPlayVoice(50);
-      wtv020sd16p.asyncPlayVoice(11);
-      IsSay = 1;
-      prevTime3 = timer;
-    }
-}
-
-
 // Additional methods
 
 void display_println(String mess) {
@@ -520,6 +403,3 @@ void display_println(double num) {
 void display_print(String mess) {
   display.print(mess);
 }
-
-
-
