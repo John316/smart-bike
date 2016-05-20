@@ -9,11 +9,11 @@
 Adafruit_ssd1306syp display(SDA_PIN, SCL_PIN);
 
 //define temperature
-#define DHTPIN 48     // к какому пину будет подключен вывод Data
+#define DHTPIN 48     // Data pin
 #define DHTTYPE DHT11   // DHT 11 
 DHT dht(DHTPIN, DHTTYPE); //init
 
-// Audio
+// Audio module
 int resetPin = 7;
 int clockPin = 6;
 int dataPin = 5;
@@ -27,13 +27,13 @@ volatile int state = 0;
 volatile long prevTime = 0;
 volatile long timer = 0;
 int localState = 0;
-// Clock 
+// Time in road
 bool printHours = false;
-long prevmicros = 0;//переменная для хранения значений таймера
-int sek = 0; //значение секунд
-int minu = 0; //значение минут
-int chas = 0; //значение часов
-boolean counter = false; // счетчик для полусекунд
+long prevmicros = 0;
+int sek = 0; 
+int minu = 0; 
+int chas = 0; 
+boolean counter = false; 
 
 //calc speed
 double oborot = 2.1;
@@ -126,15 +126,15 @@ void readButtons(){
 void CalcTimeInRoad() {
     if (micros() - prevmicros > 500000)
     { 
-      prevmicros = micros();  //принимает значение каждые полсекунды
+      prevmicros = micros();  //It is set to every half second
       counter = !counter;
       if (counter == false)
       { 
-        sek++;    //переменная секунда + 1
+        sek++;    //a second variable + 1
         
-        if(state == 0){ // когда за секунду не было прерываний магнитом
+        if(state == 0){ // when a second did not interrupt magnet
           localState++;
-          if(localState == 3){ // если 3 секунды нет сигнала от магнита
+          if(localState == 3){ // if more than 3 seconds, no signal from the magnet
             KMH = 0;
             KM = 0;
             stopBike = true;
@@ -150,19 +150,19 @@ void CalcTimeInRoad() {
         state = 0;
       }
       
-      if (sek > 59) //если переменная секунда больше 59 ...
+      if (sek > 59) 
       {
-        sek = 0; //сбрасываем ее на 0
-        minu++;//пишем +1 в переменную минута
+        sek = 0; 
+        minu++;
       }
-      if (minu > 59) //если переменная минута больше 59 ...
+      if (minu > 59) 
       {
-        minu = 0; //сбрасываем ее на 0
-        chas++;//пишем +1 в переменную час
+        minu = 0; 
+        chas++;
       }
-      if (chas > 23) //если переменная час больше 23 ...
+      if (chas > 23)
       {
-        chas = 0; //сбрасываем ее на 0
+        chas = 0; 
       }
     }
 
@@ -317,11 +317,11 @@ void PrintDistance()
 
 void PrintTermo()
 {
-    // температура
+    // Temperature
     int h = dht.readHumidity();
     int t = dht.readTemperature();
   
-    // проверяем правильные ли данные получили
+    // Check if data is received
     if (isnan(t) || isnan(h)) {
       //Serial.println("Error reading from DHT");
     } else {
