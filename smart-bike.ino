@@ -36,10 +36,11 @@ DHT dht(DHTPIN, DHTTYPE);
 
 
 // define Magnit
-// int magnitPin = 42;
+ int magnitPin = 2;
 // Interapt
 int interrupt = 0;
 volatile int state = 0;
+volatile int statePin = LOW;
 
 // define Giro
 
@@ -53,6 +54,7 @@ long prevTime3 = 0;
 int IsSay = 0;
 
 // Clock 
+bool printHours = false;
 long prevmicros = 0;//переменная для хранения значений таймера
 int sek = 0; //значение секунд
 int minu = 0; //значение минут
@@ -79,7 +81,7 @@ void setup() {
   
   dht.begin();
   wtv020sd16p.reset();
-
+  
   attachInterrupt(interrupt, magnitBlink, FALLING);
   
   // setup Servo motor
@@ -106,8 +108,10 @@ void setup() {
 }
 
 void loop() {
-	// Calc Time and Speed
-	CalcTime();
+  
+  digitalWrite(magnitPin, statePin);
+  // Calc Time and Speed
+  CalcTime();
 }
 
 void SeyHello()
@@ -125,14 +129,17 @@ void CalcTime() {
       counter = !counter;
       if (counter == false)
       { 
-        sek++;    //переменная секунда + 1
-		
-		CalcSpeed();
-		DisplayInfo();
+        localState = state;
+    state = 0;
+    
+    sek++;    //переменная секунда + 1
+    
+    CalcSpeed();
+    DisplayInfo();
       }
       else
       {
-	   
+     
       }
   
       if (sek > 59) //если переменная секунда больше 59 ...
@@ -152,32 +159,31 @@ void CalcTime() {
       //PrintTime();
     }
   }else if(state > 0){
-	stopBike = false;
-	magnitTimeout = 0;
+  stopBike = false;
+  magnitTimeout = 0;
   }
   
   //if 3 sec we have no signal from magnit
   if(magnitTimeout == 3){
     stopBike = true;
     KM = 0;
-	magnitTimeout++;
-	DisplayInfo();
+  magnitTimeout++;
+  DisplayInfo();
   }
 }
 
 // Main Logic
 
 void CalcSpeed() {
-  localState = state;
-  state = 0;
+  
   
   if(localState > 0){
-	double ms =  state * oborot / (magnitTimeout + 1);
-	KM = ms * 3.6; // meter / sec and conver to km/h
-	magnitTimeout = 0;
-	stopBike = false;
+  double ms =  state * oborot / (magnitTimeout + 1);
+  KM = ms * 3.6; // meter / sec and conver to km/h
+  magnitTimeout = 0;
+  stopBike = false;
   }else{
-	magnitTimeout++
+  magnitTimeout++;
   }
   
   // Calc Distance
@@ -257,21 +263,29 @@ void PrintDistance()
   display_println(distance);
 }
 
-void PrintTime()
-{
+void PrintTime(){
+    
+  if(printHours){
     display.setTextSize(2);
-    //if (chas>=0 && chas<10) {
-     //display_print("0");
-     //display_print(chas);
-    //}else display_print(chas);
-
+    if (chas>=0 && chas<10) {
+      display_print("0");
+      display_print(chas);
+    }
+    else 
+    {
+      display_print(chas);
+    }
+  }
      //display_print(":");
     display_print(" ");
     if (minu >= 0 && minu < 10) {
       display_print("0");
       display_print(minu);
     }
-    else display_print(minu);
+    else
+  { 
+    display_print(minu);
+  }
     
     display_print(":");
     
@@ -279,8 +293,9 @@ void PrintTime()
       display_print("0");
       display_print(sek);
     }
-    else display_print(sek);
-}
+    else {
+    display_print(sek);
+  }
   
   // read giro
   // set angule correction;
@@ -328,8 +343,7 @@ void GearSteps(int num) {
     //needCorrection(num);
 }
 
-void needCorrection(int num)
-{
+void needCorrection(int num){
   if (num > currentGear && num != currentGear)
     int correct = num - 1;
   else if (num < currentGear && num != currentGear)
@@ -443,8 +457,7 @@ void CalcMaxSpeed(int KMH) {
   }
 }
 
-void VoiceComment(int KMH)
-{
+void VoiceComment(int KMH){
   long diff = timer - prevTime3;
   if(diff > 10000){
     IsSay = 0;
@@ -475,13 +488,10 @@ void VoiceComment(int KMH)
       IsSay = 1;
       prevTime3 = timer;
     }
-  }
-
-
-// Additional Logic
-
-void ActiveSignalization() {
 }
+
+
+// Additional methods
 
 void display_println(String mess) {
   display.println(mess);
@@ -510,4 +520,6 @@ void display_println(double num) {
 void display_print(String mess) {
   display.print(mess);
 }
+
+
 
