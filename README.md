@@ -13,7 +13,7 @@ Smart bike system helps use bicycle more comfortable and receive different infor
 
 For this I use the Arduino MEGA controller, magnit sensor, servo motor, audio module, temperature and humidity detector.
 
-![Smart bike display](https://pp.vk.me/c636122/v636122338/2fa41/9eYy9fdHwTw.jpg)
+![New display](https://pp.vk.me/c636122/v636122338/9304/D38TXlD4KO8.jpg)
 
 Old display.
 
