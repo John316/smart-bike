@@ -13,7 +13,7 @@ Adafruit_ssd1306syp display(SDA_PIN, SCL_PIN);
 #define DHTTYPE DHT11   // DHT 11 
 DHT dht(DHTPIN, DHTTYPE); //init
 
-// Audio module
+// Audio
 int resetPin = 7;
 int clockPin = 6;
 int dataPin = 5;
@@ -27,8 +27,12 @@ volatile int state = 0;
 volatile long prevTime = 0;
 volatile long timer = 0;
 int localState = 0;
-// Time in road
-bool printHours = false;
+
+// Clock 
+bool printHours = true;
+bool printMin = true;
+bool printSec = false;
+
 long prevmicros = 0;
 int sek = 0; 
 int minu = 0; 
@@ -42,9 +46,9 @@ int KMH = 0;
 int magnitTimeout = 0;
 bool stopBike = false;
 
-double maxSpeed = 0.00;
+short int maxSpeed = 0;
 double countOborots = 0.00;
-double distance = 0.00;
+short int distance = 0;
 
 //Gear control 
 long LastChangeGearTime = 0;
@@ -52,6 +56,12 @@ int currentGear = 3;
 String LastChangedGear = "";
 bool servoAtMiddle = true;
 int servoZero = 124;
+
+// Battery
+int battery = 0;
+int batCounter = 0;
+int voltBuffer = 0;
+
 
 // define Servo motor 
 Servo backGearServo;
@@ -78,7 +88,6 @@ void setup() {
   display.println("Welcome!");
   display.update();
   
-  // put your setup code here, to run once:
   attachInterrupt(0, magnitBlink, FALLING);
 
   digitalWrite(2, HIGH);
@@ -89,10 +98,10 @@ void setup() {
   Serial.begin(9600);
   Serial.println("Start");
   SetServoToZero();
-  DisplayInfo();
+  DisplayInfo(); 
   // audio ok sound
   wtv020sd16p.asyncPlayVoice(0);
-  delay(2000);
+  delay(500);
 }
 
 void loop() {
@@ -105,10 +114,11 @@ void magnitBlink()
   double diff = timer - prevTime;
   double a = diff / 1000;
   double ms =  oborot / a;
-  KM = ms * 3.6; 
+  KM = ms * 3.6; // in double
+  KMH = ceil(KM); // in int
   prevTime = timer;
   countOborots++;
-  state = 1;
+  state = 1; // for check timeout
 }
 
 void readButtons(){
@@ -130,24 +140,9 @@ void CalcTimeInRoad() {
       counter = !counter;
       if (counter == false)
       { 
-        sek++;    //a second variable + 1
+        sek++;   //a second variable + 1
         
-        if(state == 0){ // when a second did not interrupt magnet
-          localState++;
-          if(localState == 3){ // if more than 3 seconds, no signal from the magnet
-            KMH = 0;
-            KM = 0;
-            stopBike = true;
-            wtv020sd16p.asyncPlayVoice(10);
-          }
-        }else{
-          localState = 0;
-          stopBike = false;
-        }
-        KMH = ceil(KM);
-        SpeedController(KMH);
-        DisplayInfo();
-        state = 0;
+        OperationOncePerSecond();
       }
       
       if (sek > 59) 
@@ -165,7 +160,31 @@ void CalcTimeInRoad() {
         chas = 0; 
       }
     }
+}
 
+void OperationOncePerSecond()
+{
+  CheckVoltage();
+  CheckIsBikeStop();
+  SpeedController(KMH);
+  DisplayInfo();
+}
+
+void CheckIsBikeStop()
+{
+  if(state == 0){ //  when a second did not interrupt magnet
+    localState++;
+    if(localState == 3){ // if more than 3 seconds, no signal from the magnet
+      KMH = 0;
+      KM = 0;
+      stopBike = true;
+      wtv020sd16p.asyncPlayVoice(10);
+    }
+  }else{
+    localState = 0;
+    stopBike = false;
+  }
+  state = 0;
 }
 
 void CalcMaxSpeed(double KMH){
@@ -271,22 +290,90 @@ void setManualGearLow(){
 
 void DisplayInfo() {
   display.clear();
-  display.setCursor(0, 0);  
+  display.setCursor(0, 0);
   PrintTime();
   PrintGear();
   PrintSpeed();
   PrintTermo();  
+  PrintVoltage();
   PrintDistance();
   PrintMaxSpeed();
-
   display.update();
+}
+
+void CheckVoltage()
+{
+  if(batCounter == 5)
+  {
+    battery = voltBuffer / 5; // midddle value
+    batCounter = 0;
+    voltBuffer = 0;
+  }else{
+    voltBuffer += readVcc();
+    batCounter++;
+  }
+}
+
+int getBatteryLevel()
+{
+  int batLevel = 0;
+  if(battery < 3300)
+    batLevel = 0;
+  else if(battery >= 3300 && battery < 4000)
+    batLevel = 1;
+  else if(battery >= 4000 && battery < 4500)
+    batLevel = 2;
+  else if(battery > 4500)
+    batLevel = 3;
+
+ return batLevel;
+}
+
+void PrintVoltage()
+{
+  if(battery > 0)
+    ToDrawTheBattery();
+ 
+  int batteryLevel = getBatteryLevel();
+  
+  if(batteryLevel == 3)
+  {
+    //As tutorial display.fillRect(x, y, w, h, color);
+    display.fillRect(103, 3, 6, 10, WHITE);
+    display.fillRect(111, 3, 6, 10, WHITE);
+    display.fillRect(119, 3, 6, 10, WHITE);
+  }else if(batteryLevel == 2)
+  {
+    display.fillRect(111, 3, 6, 10, WHITE);
+    display.fillRect(119, 3, 6, 10, WHITE);
+  }else if(batteryLevel == 1)
+  {
+    display.fillRect(119, 3, 6, 10, WHITE);
+  }
+  
+}
+
+void ToDrawTheBattery()
+{
+  //As tutorial display.drawFastVLine(x,y,h,color);
+  display.drawFastVLine(127,0,16,WHITE);
+  display.drawFastHLine(101,0,26,WHITE);
+  display.drawFastHLine(101,15,26,WHITE);
+  display.drawFastVLine(100,0,5,WHITE);
+  display.drawFastVLine(100,11,5,WHITE);
+  display.drawFastVLine(97,4,8,WHITE);
+  display.drawFastHLine(98,4,2,WHITE);
+  display.drawFastHLine(98,11,2,WHITE);
 }
 
 void PrintGear()
 {
+  display.fillRect(115, 17, 12, 16, WHITE);
+  display.setCursor(116, 18);
   display.setTextSize(2);
-  display_print("  G");
-  display_println(currentGear);
+  display.setTextColor(BLACK);
+  display_print(currentGear);
+  display.setTextColor(WHITE);
 }
 
 void PrintSpeed()
@@ -303,25 +390,32 @@ void PrintMaxSpeed()
 {
   display.setCursor(66, 53);
   display.setTextSize(1);
-  display_print("Max:");
+  display_print("Max: ");
   display_println(maxSpeed);
 }
 
 void PrintDistance()
 {
-  display.setCursor(66, 37);
+  // Graw road
+  display.drawFastHLine(66,37,13,WHITE);
+  
+  display.drawFastHLine(66,41,3,WHITE);
+  display.drawFastHLine(71,41,3,WHITE);
+  display.drawFastHLine(76,41,3,WHITE);
+  
+  display.drawFastHLine(66,45,13,WHITE);
+  
+  display.setCursor(84, 38);
   display.setTextSize(1);
-  display_print("Dist: ");
-  display_println(distance);
+  display_print(distance);
+  display_println(" km");
 }
 
 void PrintTermo()
 {
-    // Temperature
     int h = dht.readHumidity();
     int t = dht.readTemperature();
   
-    // Check if data is received
     if (isnan(t) || isnan(h)) {
       //Serial.println("Error reading from DHT");
     } else {
@@ -329,36 +423,49 @@ void PrintTermo()
       display.setTextSize(1);
       int _t = t - 2;
       int _h = h - 10;
+      display_print("t");
+      display.setCursor(75, 22);
       display_print(_t);
-      display_print(" *C ");
-      display_print(_h);
-      display_print(" %");
+      display.drawCircle(90, 22, 2, WHITE);
+      display.setCursor(96, 22);
+      display_print("C");
+      //display_print(_h);
+      //display_print(" %");
     }
 }
 
 void PrintTime(){
+
+  //Draw the clock
+  display.drawCircle(7, 7, 7, WHITE);
+  display.drawFastVLine(7, 3, 5, WHITE);
+  display.drawFastHLine(8, 7, 3, WHITE);
+  
+  display.setCursor(19, 1);
   display.setTextSize(2);
+
   if(printHours){
     if (chas>=0 && chas<10) {
-      display_print("0");
+      //display_print("0");
       display_print(chas);
     }
     else 
     {
       display_print(chas);
     }
+    display_print(":");
   }
-     //display_print(":");
-    display_print(" ");
+  if(printMin){
     if (minu >= 0 && minu < 10) {
       display_print("0");
       display_print(minu);
     }
     else
-  { 
-    display_print(minu);
+    { 
+      display_print(minu);
+    }
   }
-    
+  if(printSec){
     display_print(":");
     
     if (sek >= 0 && sek < 10) {
@@ -367,14 +474,37 @@ void PrintTime(){
     }
     else {
     display_print(sek);
+    }
   }
-  
-  // read giro
-  // set angule correction;
-  // active Signalization
 }
 
 // Additional methods
+
+long readVcc() {
+  // Read 1.1V reference against AVcc
+  // set the reference to Vcc and the measurement to the internal 1.1V reference
+  #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+    ADMUX = _BV(REFS0) | _BV(MUX4) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  #elif defined (__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
+    ADMUX = _BV(MUX5) | _BV(MUX0);
+  #elif defined (__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
+    ADMUX = _BV(MUX3) | _BV(MUX2);
+  #else
+    ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  #endif  
+
+  delay(75); // Wait for Vref to settle
+  ADCSRA |= _BV(ADSC); // Start conversion
+  while (bit_is_set(ADCSRA,ADSC)); // measuring
+
+  uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH  
+  uint8_t high = ADCH; // unlocks both
+
+  long result = (high<<8) | low;
+
+  result = 1125300L / result; // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
+  return result; // Vcc in millivolts
+}
 
 void display_println(String mess) {
   display.println(mess);
