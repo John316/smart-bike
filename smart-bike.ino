@@ -62,7 +62,13 @@ int battery = 0;
 int batCounter = 0;
 int voltBuffer = 0;
 
+// UltraSound
+int pingPin = 40;//trig
+int inPin = 38;//echo
 
+//Alarm
+bool isFirst = true;
+bool alarmOn = false;
 // define Servo motor 
 Servo backGearServo;
 
@@ -74,6 +80,11 @@ void setup() {
 
   pinMode(buttonGearLow, INPUT);
   digitalWrite(buttonGearLow, HIGH);
+
+  // UltraSound
+  pinMode(inPin, INPUT);
+  pinMode(pingPin, OUTPUT);
+  digitalWrite(pingPin, LOW);
 
   // Audio
   dht.begin();
@@ -97,7 +108,10 @@ void setup() {
 
   Serial.begin(9600);
   Serial.println("Start");
-  SetServoToZero();
+  
+  // Set servo to zero
+  backGearServo.write(servoZero);
+  
   DisplayInfo(); 
   // audio ok sound
   wtv020sd16p.asyncPlayVoice(0);
@@ -105,9 +119,15 @@ void setup() {
 }
 
 void loop() {
-  CalcTimeInRoad();
-  TurnBackServo();
+  if(!alarmOn){
+    CalcTimeInRoad();
+    TurnBackServo();
+  }else{
+    UnableAlarm();
+    delay(100);
+  }
 }
+
 void magnitBlink()
 {
   timer = millis();
@@ -133,6 +153,72 @@ void readButtons(){
     delay(50);
   }
 }
+
+void UnableAlarm(){
+  int dist = getDistanceToObject();
+  if(dist < 100){
+      if(isFirst){
+        //sey Attantion
+        wtv020sd16p.asyncPlayVoice(20); // вы подошли слишком близко
+        delay(5000);
+      }
+      
+      if(dist < 100 && isFirst){
+        // on Alarm for a sec
+        digitalWrite(buttonGearHigh, HIGH);
+        delay(1000);
+        // off Alarm
+        digitalWrite(buttonGearHigh, LOW);
+        wtv020sd16p.asyncPlayVoice(21); // это было предупреждение
+        isFirst = false;
+      }else if(dist < 100 && !isFirst){
+        // on Alarm for 2 min.
+        wtv020sd16p.asyncPlayVoice(22); // я пердупреждал
+        delay(2000);
+        digitalWrite(buttonGearHigh, HIGH);
+        
+      }
+  }
+}
+int getDistanceToObject(){
+  int distanceToObject = 0; 
+  long duration, cm,tmp1;//объявляем переменные
+  //посылаем датчику сигнал начала замера (высокий уровень на 10 мкс)
+  digitalWrite(pingPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(pingPin, LOW);
+  //делаем паузу чтобы датчик успел среагировать
+  delayMicroseconds(500);
+  //засекаем время в микросекундах
+  tmp1 = micros();
+  //ждем пока сигнал на выходе echo не станет низкий
+  while(digitalRead(inPin)==HIGH){
+    //если долго нет ответа от датчика, значит препятствий в зоне видимости нет, выходим по таймауту
+    if(micros() - tmp1 > 15000)
+      break;
+  }
+  //вычисляем время "полета" ультразвукового сигнала
+  duration=micros() - tmp1;
+  cm = microsecondsToCentimeters(duration);//переводим время в сантиметры
+  
+  Serial.print("Distance: ");
+  //если помех не обнаружено сообщаем что расстояние более 1.5 метра
+  
+  if(duration<15000){
+    distanceToObject = cm;
+    Serial.println(cm);//иначе выводим расстояние до помехи в сантиметрах
+  }else{
+    Serial.println(">1.5m");
+  }
+    return distanceToObject;
+}
+
+long microsecondsToCentimeters(long microseconds)
+{
+  //скорость звука 340 м/с или 29,412 микросекунд/см, а поскольку звук летит до помехи и обратно, делим результат на двое
+  return microseconds / 29.412 / 2;
+}
+
 void CalcTimeInRoad() {
     if (micros() - prevmicros > 500000)
     { 
@@ -236,14 +322,8 @@ void ChangeGear(int num) {
 void makeStep(int num) {
   if (num > currentGear){
     GearHigh();
-    currentGear++;
-    // Say current gear
-    wtv020sd16p.asyncPlayVoice(currentGear);
   }else if (num < currentGear){
     GearLow();
-    currentGear--;
-    // Say current gear
-    wtv020sd16p.asyncPlayVoice(currentGear);
   }
 }
 
@@ -253,6 +333,9 @@ void GearHigh(){
     backGearServo.write(180);
     LastChangedGear = "high";
     servoAtMiddle = false;
+    currentGear++;
+    // Say current gear
+    wtv020sd16p.asyncPlayVoice(currentGear);
 }
 
 void GearLow(){
@@ -261,6 +344,9 @@ void GearLow(){
     backGearServo.write(0);
     LastChangedGear = "low";
     servoAtMiddle = false;
+    currentGear--;
+    // Say current gear
+    wtv020sd16p.asyncPlayVoice(currentGear);
 }  
 
 void TurnBackServo(){
@@ -268,16 +354,21 @@ void TurnBackServo(){
     long now = millis();
     long diff = now - LastChangeGearTime;
     
-    if(LastChangedGear == "high" && diff >= 500)
-      SetServoToZero();
-    if(LastChangedGear == "low" && diff >= 900)
-      SetServoToZero();  
+    if(LastChangedGear == "high" && diff >= 400)
+      SetServoToZero(diff);
+      
+    if(LastChangedGear == "low" && diff >= 800)
+      SetServoToZero(diff);  
   }
 }
 
-void SetServoToZero(){
+void SetServoToZero(long diff){
     backGearServo.write(servoZero);
-    servoAtMiddle = true;
+    if(LastChangedGear == "high" && diff >= 400)
+      servoAtMiddle = true;
+
+    if(LastChangedGear == "low" && diff >= 800)
+      servoAtMiddle = true;
 }
 
 void setManualGearHigh(){
