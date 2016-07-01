@@ -23,6 +23,12 @@ Wtv020sd16p wtv020sd16p(resetPin,clockPin,dataPin,busyPin);
 int buttonGearHigh = 26;
 int buttonGearLow = 28;
 
+// Pedal
+volatile int statePedal = 0;
+volatile long prevTimePedal = 0;
+volatile long timerPedal = 0;
+volatile int valPedal = 0;
+
 volatile int state = 0;
 volatile long prevTime = 0;
 volatile long timer = 0;
@@ -99,9 +105,14 @@ void setup() {
   display.println("Welcome!");
   display.update();
   
-  attachInterrupt(0, magnitBlink, FALLING);
+  //pinMode(2, INPUT);
+  //pinMode(3, INPUT);
+  
+  attachInterrupt(3, CalcPedal, FALLING);
+  attachInterrupt(4, CalcSpeed, FALLING);
 
-  digitalWrite(2, HIGH);
+  //digitalWrite(2, HIGH);
+  //digitalWrite(3, HIGH);
 
   // setup Servo motor
   backGearServo.attach(3);
@@ -119,8 +130,9 @@ void setup() {
 }
 
 void loop() {
+  CalcTimeInRoad();
   if(!alarmOn){
-    CalcTimeInRoad();
+    //CalcTimeInRoad();
     TurnBackServo();
   }else{
     UnableAlarm();
@@ -128,7 +140,17 @@ void loop() {
   }
 }
 
-void magnitBlink()
+void CalcPedal()
+{
+  timerPedal = millis();
+  double diff = timerPedal - prevTimePedal;
+  double a = diff / 1000;
+  double ms =  oborot / a;
+  valPedal = ms * 3.6;
+  prevTimePedal = timerPedal;
+}
+
+void CalcSpeed()
 {
   timer = millis();
   double diff = timer - prevTime;
@@ -159,7 +181,7 @@ void UnableAlarm(){
   if(dist < 100){
       if(isFirst){
         //sey Attantion
-        wtv020sd16p.asyncPlayVoice(20); // вы подошли слишком близко
+        wtv020sd16p.asyncPlayVoice(20); 
         delay(5000);
       }
       
@@ -169,53 +191,44 @@ void UnableAlarm(){
         delay(1000);
         // off Alarm
         digitalWrite(buttonGearHigh, LOW);
-        wtv020sd16p.asyncPlayVoice(21); // это было предупреждение
+        wtv020sd16p.asyncPlayVoice(21); 
         isFirst = false;
       }else if(dist < 100 && !isFirst){
         // on Alarm for 2 min.
-        wtv020sd16p.asyncPlayVoice(22); // я пердупреждал
+        wtv020sd16p.asyncPlayVoice(22); 
         delay(2000);
         digitalWrite(buttonGearHigh, HIGH);
         
       }
   }
 }
+
 int getDistanceToObject(){
   int distanceToObject = 0; 
-  long duration, cm,tmp1;//объявляем переменные
-  //посылаем датчику сигнал начала замера (высокий уровень на 10 мкс)
+  long duration, cm, tmp1;
   digitalWrite(pingPin, HIGH);
   delayMicroseconds(10);
   digitalWrite(pingPin, LOW);
-  //делаем паузу чтобы датчик успел среагировать
   delayMicroseconds(500);
-  //засекаем время в микросекундах
   tmp1 = micros();
-  //ждем пока сигнал на выходе echo не станет низкий
   while(digitalRead(inPin)==HIGH){
-    //если долго нет ответа от датчика, значит препятствий в зоне видимости нет, выходим по таймауту
     if(micros() - tmp1 > 15000)
       break;
   }
-  //вычисляем время "полета" ультразвукового сигнала
   duration=micros() - tmp1;
-  cm = microsecondsToCentimeters(duration);//переводим время в сантиметры
-  
+  cm = microsecondsToCentimeters(duration);
   Serial.print("Distance: ");
-  //если помех не обнаружено сообщаем что расстояние более 1.5 метра
-  
   if(duration<15000){
     distanceToObject = cm;
-    Serial.println(cm);//иначе выводим расстояние до помехи в сантиметрах
+    Serial.println(cm);
   }else{
     Serial.println(">1.5m");
   }
-    return distanceToObject;
+  return distanceToObject;
 }
 
 long microsecondsToCentimeters(long microseconds)
 {
-  //скорость звука 340 м/с или 29,412 микросекунд/см, а поскольку звук летит до помехи и обратно, делим результат на двое
   return microseconds / 29.412 / 2;
 }
 
@@ -226,8 +239,7 @@ void CalcTimeInRoad() {
       counter = !counter;
       if (counter == false)
       { 
-        sek++;   //a second variable + 1
-        
+        sek++;   //a second variable + 1       
         OperationOncePerSecond();
       }
       
@@ -387,7 +399,8 @@ void DisplayInfo() {
   PrintSpeed();
   PrintTermo();  
   PrintVoltage();
-  PrintDistance();
+  //PrintDistance();
+  PrintPedal();
   PrintMaxSpeed();
   display.update();
 }
@@ -483,6 +496,14 @@ void PrintMaxSpeed()
   display.setTextSize(1);
   display_print("Max: ");
   display_println(maxSpeed);
+}
+
+void PrintPedal()
+{
+  display.setCursor(66, 38);
+  display.setTextSize(1);
+  display_print("Ped: ");
+  display_println(valPedal);
 }
 
 void PrintDistance()
